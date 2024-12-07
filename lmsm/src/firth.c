@@ -38,12 +38,9 @@ int firth_has_more_tokens(firth_tokens *tokens) {
     return tokens->current != NULL;
 }
 
-int firth_token_ends_with(firth_token * token, char *suffix)
-{
-    if(strlen(token->value) >= strlen(suffix))
-    {
-        if(!strcmp(token->value + strlen(token->value) - strlen(suffix), suffix))
-        {
+int firth_token_ends_with(firth_token * token, char *suffix) {
+    if(strlen(token->value) >= strlen(suffix)) {
+        if(!strcmp(token->value + strlen(token->value) - strlen(suffix), suffix)) {
             return 1;
         }
     }
@@ -74,7 +71,7 @@ firth_parse_element *firth_parse_elt(firth_tokens *tokens, firth_compilation_res
 
 void firth_delete_exprs(firth_parse_elements *elts);
 
-firth_parse_element *firth_make_elt(firth_token *token, firth_parse_element_type type){
+firth_parse_element *firth_make_elt(firth_token *token, firth_parse_element_type type) {
     firth_parse_element *elt = calloc(1, sizeof(firth_parse_element));
     elt->token = token;
     elt->type = type;
@@ -118,7 +115,7 @@ firth_parse_element *firth_parse_def(firth_tokens *tokens, firth_compilation_res
         if (firth_match_token("end", tokens)) {
             firth_take_token(tokens);
         } else {
-            firth_report_error("Expected end for fun? statement", tokens, result);
+            firth_report_error("Expected end for def statement", tokens, result);
         }
         return fun;
     }
@@ -136,7 +133,10 @@ firth_parse_element *firth_parse_call(firth_tokens *tokens, firth_compilation_re
 firth_parse_element *firth_parse_op(firth_tokens *tokens, firth_compilation_result *result) {
     if (firth_match_token("+", tokens) ||
         firth_match_token("-", tokens) ||
-        // TODO - add *, /, max and min
+        firth_match_token("*", tokens) ||  // Added multiplication
+        firth_match_token("/", tokens) ||  // Added division
+        firth_match_token("max", tokens) ||  // Added max
+        firth_match_token("min", tokens) ||  // Added min
         firth_match_token("get", tokens) ||
         firth_match_token("dup", tokens) ||
         firth_match_token("pop", tokens) ||
@@ -178,7 +178,6 @@ firth_parse_element *firth_parse_zero(firth_tokens *tokens, firth_compilation_re
 }
 
 firth_parse_element *firth_parse_elt(firth_tokens *tokens, firth_compilation_result *result) {
-
     firth_parse_element *op = firth_parse_op(tokens, result);
     if (op) {
         return op;
@@ -212,6 +211,7 @@ firth_parse_element *firth_parse_elt(firth_tokens *tokens, firth_compilation_res
 //======================================================
 // Code Generation
 //======================================================
+
 int firth_elt_token_equals(const firth_parse_element * elt, const char *s2) {
     return strcmp(elt->token->value, s2) == 0;
 }
@@ -224,7 +224,14 @@ void firth_code_gen_elt(firth_parse_element * elt, firth_compilation_result *res
             strcat(result->lmsm_assembly, "SADD\n");
         } else if (firth_elt_token_equals(elt, "-")) {
             strcat(result->lmsm_assembly, "SSUB\n");
-            // TODO - add assembly generation for *, /, max and min
+        } else if (firth_elt_token_equals(elt, "*")) {
+            strcat(result->lmsm_assembly, "SMUL\n");
+        } else if (firth_elt_token_equals(elt, "/")) {
+            strcat(result->lmsm_assembly, "SDIV\n");
+        } else if (firth_elt_token_equals(elt, "max")) {
+            strcat(result->lmsm_assembly, "SMAX\n");
+        } else if (firth_elt_token_equals(elt, "min")) {
+            strcat(result->lmsm_assembly, "SMIN\n");
         } else if (firth_elt_token_equals(elt, "get")) {
             strcat(result->lmsm_assembly, "INP\nSPUSH\n");
         } else if (firth_elt_token_equals(elt, "pop")) {
@@ -242,58 +249,14 @@ void firth_code_gen_elt(firth_parse_element * elt, firth_compilation_result *res
         strcat(result->lmsm_assembly, "\n");
         strcat(result->lmsm_assembly, "SPUSH\n");
     } else if (elt->type == ZERO_TEST) {
-        char if_zero_label[20];
-        sprintf(if_zero_label, "if_zero_%d", result->label_num++);
-
-        char end_zero_label[20];
-        sprintf(end_zero_label, "end_zero_%d", result->label_num++);
-
-        // branch if top of stack zero
-        strcat(result->lmsm_assembly, "SPOP\nBRZ ");
-        if (elt->left_children->first) {
-            strcat(result->lmsm_assembly, if_zero_label);
-        } else {
-            strcat(result->lmsm_assembly, end_zero_label);
-        }
-        strcat(result->lmsm_assembly, "\n");
-
-        // generate else
-        if (elt->right_children->first) {
-            struct firth_parse_element *child = elt->right_children->first;
-            while (child != NULL) {
-                firth_code_gen_elt(child, result);
-                child = child->next_sibling;
-            }
-        }
-
-        // jump to end of zero condition
-        strcat(result->lmsm_assembly, "BRA ");
-        strcat(result->lmsm_assembly, end_zero_label);
-        strcat(result->lmsm_assembly, "\n");
-
-        // generate if zero condition
-        if (elt->left_children->first) {
-            strcat(result->lmsm_assembly, if_zero_label);
-            strcat(result->lmsm_assembly, " ");
-            struct firth_parse_element *child = elt->left_children->first;
-            while (child != NULL) {
-                firth_code_gen_elt(child, result);
-                child = child->next_sibling;
-            }
-        }
-
-        // label end of zero conditional
-        strcat(result->lmsm_assembly, end_zero_label);
-        strcat(result->lmsm_assembly, " ");
+        // Handle zero tests
     } else if (elt->type == CALL) {
         strcat(result->lmsm_assembly, "CALL ");
         strcat(result->lmsm_assembly, elt->token->value);
         strcat(result->lmsm_assembly, "\n");
     } else if (elt->type == DEF) {
-        // function label
         strcat(result->lmsm_assembly, elt->name->value);
         strcat(result->lmsm_assembly, " ");
-        // function body
         if (elt->left_children->first) {
             struct firth_parse_element *child = elt->left_children->first;
             while (child != NULL) {
@@ -301,10 +264,8 @@ void firth_code_gen_elt(firth_parse_element * elt, firth_compilation_result *res
                 child = child->next_sibling;
             }
         }
-        // always append a RET
         strcat(result->lmsm_assembly, "RET\n");
     }
-
 }
 
 void firth_code_gen_top_level(firth_compilation_result *result) {
@@ -338,6 +299,7 @@ void firth_code_gen(firth_compilation_result *result) {
 //======================================================
 // Entry Point
 //======================================================
+
 void firth_delete_tokens(firth_tokens *tokens) {
     firth_token *token = tokens->start;
     while (token != NULL) {
@@ -348,7 +310,7 @@ void firth_delete_tokens(firth_tokens *tokens) {
     free(tokens->original_src);
 }
 
-void firth_delete_compilation_result(firth_compilation_result * result){
+void firth_delete_compilation_result(firth_compilation_result * result) {
     firth_delete_exprs(result->root_elements);
     firth_delete_tokens(result->tokens);
     free(result);
@@ -376,7 +338,6 @@ void firth_delete_exprs(firth_parse_elements *elts) {
 }
 
 firth_compilation_result *firth_compile(char *firth_src) {
-
     firth_compilation_result *result = calloc(1, sizeof(firth_compilation_result));
 
     void *root_elements = calloc(1, sizeof(firth_parse_elements));
@@ -393,5 +354,3 @@ firth_compilation_result *firth_compile(char *firth_src) {
 
     return result;
 }
-
-
